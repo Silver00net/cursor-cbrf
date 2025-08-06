@@ -1,29 +1,13 @@
 const orderedCodes = ["USD", "EUR", "GBP", "JPY", "CHF", "CNY", "TRY", "HKD", "AED", "INR"];
 
 const flagMap = {
-    USD: "us", 
-    EUR: "eu", 
-    GBP: "gb", 
-    JPY: "jp", 
-    CHF: "ch", 
-    CNY: "cn", 
-    TRY: "tr", 
-    HKD: "hk", 
-    AED: "ae", 
-    INR: "in"
+    USD: "us", EUR: "eu", GBP: "gb", JPY: "jp", CHF: "ch", 
+    CNY: "cn", TRY: "tr", HKD: "hk", AED: "ae", INR: "in"
 };
 
 const currencySymbols = {
-    USD: "$", 
-    EUR: "€", 
-    GBP: "£", 
-    JPY: "¥", 
-    CHF: "₣", 
-    CNY: "¥", 
-    TRY: "₺", 
-    HKD: "HK$", 
-    AED: "د.إ", 
-    INR: "₹"
+    USD: "$", EUR: "€", GBP: "£", JPY: "¥", CHF: "₣", 
+    CNY: "¥", TRY: "₺", HKD: "HK$", AED: "د.إ", INR: "₹"
 };
 
 // Глобальные переменные
@@ -35,12 +19,43 @@ const CACHE_KEY = 'cbrf_currency_cache';
 const CACHE_EXPIRY_KEY = 'cbrf_cache_expiry';
 const CACHE_DURATION = 30 * 60 * 1000; // 30 минут
 
-// Утилиты для работы с кэшем
+// Пул объектов для переиспользования
+const ObjectPool = {
+    elements: new WeakMap(),
+    animationFrames: new Set(),
+    
+    getElement(key) {
+        return this.elements.get(key);
+    },
+    
+    setElement(key, value) {
+        this.elements.set(key, value);
+    },
+    
+    addFrame(id) {
+        this.animationFrames.add(id);
+    },
+    
+    removeFrame(id) {
+        this.animationFrames.delete(id);
+    },
+    
+    clearFrames() {
+        this.animationFrames.forEach(id => cancelAnimationFrame(id));
+        this.animationFrames.clear();
+    }
+};
+
+// Оптимизированный кэш-менеджер
 const CacheManager = {
+    _cache: new Map(),
+    
     set(data) {
         try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            const serialized = JSON.stringify(data);
+            localStorage.setItem(CACHE_KEY, serialized);
             localStorage.setItem(CACHE_EXPIRY_KEY, Date.now() + CACHE_DURATION);
+            this._cache.set(CACHE_KEY, data); // В памяти для быстрого доступа
         } catch (e) {
             console.warn('Не удалось сохранить данные в кэш:', e);
         }
@@ -48,13 +63,27 @@ const CacheManager = {
 
     get() {
         try {
+            // Сначала проверяем кэш в памяти
+            if (this._cache.has(CACHE_KEY)) {
+                const expiry = localStorage.getItem(CACHE_EXPIRY_KEY);
+                if (expiry && Date.now() <= parseInt(expiry)) {
+                    return this._cache.get(CACHE_KEY);
+                }
+            }
+            
             const expiry = localStorage.getItem(CACHE_EXPIRY_KEY);
             if (!expiry || Date.now() > parseInt(expiry)) {
                 this.clear();
                 return null;
             }
+            
             const data = localStorage.getItem(CACHE_KEY);
-            return data ? JSON.parse(data) : null;
+            if (data) {
+                const parsed = JSON.parse(data);
+                this._cache.set(CACHE_KEY, parsed);
+                return parsed;
+            }
+            return null;
         } catch (e) {
             console.warn('Ошибка чтения кэша:', e);
             return null;
@@ -65,96 +94,115 @@ const CacheManager = {
         try {
             localStorage.removeItem(CACHE_KEY);
             localStorage.removeItem(CACHE_EXPIRY_KEY);
+            this._cache.clear();
         } catch (e) {
             console.warn('Ошибка очистки кэша:', e);
         }
     }
 };
 
-// Управление состоянием подключения
+// Дебаунс функция для оптимизации
+const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+};
+
+// Управление состоянием подключения с оптимизацией
 const ConnectionManager = {
     isOnline: navigator.onLine,
+    statusElement: null,
     
     init() {
-        window.addEventListener('online', () => {
+        // Создаем элемент статуса заранее
+        this.statusElement = document.createElement('div');
+        this.statusElement.id = 'connectionStatus';
+        this.statusElement.className = 'connection-status';
+        this.statusElement.style.display = 'none';
+        document.body.appendChild(this.statusElement);
+        
+        const handleOnline = debounce(() => {
             this.isOnline = true;
             this.updateStatus('Подключение восстановлено');
             setTimeout(() => this.hideStatus(), 3000);
-        });
+        }, 300);
         
-        window.addEventListener('offline', () => {
+        const handleOffline = debounce(() => {
             this.isOnline = false;
             this.updateStatus('Работа в офлайн режиме', true);
-        });
+        }, 300);
+        
+        window.addEventListener('online', handleOnline, { passive: true });
+        window.addEventListener('offline', handleOffline, { passive: true });
     },
 
     updateStatus(message, isOffline = false) {
-        const status = document.getElementById('connectionStatus');
-        if (!status) {
-            const statusEl = document.createElement('div');
-            statusEl.id = 'connectionStatus';
-            statusEl.className = 'connection-status';
-            document.body.appendChild(statusEl);
-        }
+        if (!this.statusElement) return;
         
-        const statusEl = document.getElementById('connectionStatus');
-        statusEl.textContent = message;
-        statusEl.className = `connection-status ${isOffline ? 'offline' : ''}`;
-        statusEl.style.display = 'block';
+        this.statusElement.textContent = message;
+        this.statusElement.className = `connection-status ${isOffline ? 'offline' : ''}`;
+        this.statusElement.style.display = 'block';
     },
 
     hideStatus() {
-        const status = document.getElementById('connectionStatus');
-        if (status) {
-            status.style.display = 'none';
+        if (this.statusElement) {
+            this.statusElement.style.display = 'none';
         }
     }
 };
 
-// Ленивая загрузка флагов
+// Оптимизированная ленивая загрузка флагов
 const FlagLoader = {
     loadedFlags: new Set(),
+    observer: null,
     
-    async loadFlag(flagCode) {
+    init() {
+        // Создаем observer один раз
+        this.observer = new IntersectionObserver(
+            this.handleIntersection.bind(this),
+            { threshold: 0.1, rootMargin: '50px' }
+        );
+    },
+    
+    handleIntersection(entries) {
+        const fragment = document.createDocumentFragment();
+        
+        for (const entry of entries) {
+            if (entry.isIntersecting) {
+                const flagCode = entry.target.getAttribute('data-flag');
+                this.loadFlag(flagCode, entry.target);
+                this.observer.unobserve(entry.target);
+            }
+        }
+    },
+    
+    loadFlag(flagCode, element) {
         if (this.loadedFlags.has(flagCode)) return;
         
-        const flagElement = document.querySelector(`[data-flag="${flagCode}"]`);
-        if (!flagElement) return;
-
-        try {
-            // Предзагрузка изображения флага
-            const img = new Image();
-            img.onload = () => {
-                flagElement.classList.add('loaded');
-                this.loadedFlags.add(flagCode);
-            };
-            img.onerror = () => {
-                console.warn(`Не удалось загрузить флаг: ${flagCode}`);
-                flagElement.classList.add('loaded'); // Показываем элемент даже при ошибке
-            };
-            
-            // Устанавливаем источник изображения (флаги загружаются через CSS)
-            flagElement.classList.add('loaded');
+        // Используем requestIdleCallback для неблокирующей загрузки
+        const loadCallback = () => {
+            element.classList.add('loaded');
             this.loadedFlags.add(flagCode);
-        } catch (e) {
-            console.warn(`Ошибка загрузки флага ${flagCode}:`, e);
-            flagElement.classList.add('loaded');
+        };
+        
+        if (window.requestIdleCallback) {
+            requestIdleCallback(loadCallback);
+        } else {
+            setTimeout(loadCallback, 0);
         }
     },
 
     loadVisibleFlags() {
-        const flagElements = document.querySelectorAll('.flag[data-flag]');
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const flagCode = entry.target.getAttribute('data-flag');
-                    this.loadFlag(flagCode);
-                    observer.unobserve(entry.target);
-                }
-            });
-        });
-
-        flagElements.forEach(flag => observer.observe(flag));
+        if (!this.observer) this.init();
+        
+        const flagElements = document.querySelectorAll('.flag[data-flag]:not(.loaded)');
+        flagElements.forEach(flag => this.observer.observe(flag));
     }
 };
 
@@ -168,35 +216,56 @@ class APIError extends Error {
     }
 }
 
-function formatDateCBR(date) {
+// Мемоизация для функций форматирования
+const memoize = (fn) => {
+    const cache = new Map();
+    return (...args) => {
+        const key = JSON.stringify(args);
+        if (cache.has(key)) {
+            return cache.get(key);
+        }
+        const result = fn(...args);
+        cache.set(key, result);
+        return result;
+    };
+};
+
+const formatDateCBR = memoize((date) => {
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
-}
+});
 
-function getLastWorkingDay(date) {
+const getLastWorkingDay = memoize((dateString) => {
+    const date = new Date(dateString);
     const d = new Date(date);
     let day = d.getDay();
     if (day === 0) d.setDate(d.getDate() - 2); // Sunday -> Friday
     else if (day === 6) d.setDate(d.getDate() - 1); // Saturday -> Friday
     return d;
-}
+});
 
+// Оптимизированный fetch с пулом соединений
 async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
+    const fetchOptions = {
+        headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        },
+        keepalive: true // Переиспользование соединения
+    };
+    
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             const proxyUrl = 'https://kurscbrf.free.nf/New1/proxy.php?url=' + encodeURIComponent(url);
             
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
             
             const response = await fetch(proxyUrl, {
-                signal: controller.signal,
-                headers: {
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
-                }
+                ...fetchOptions,
+                signal: controller.signal
             });
             
             clearTimeout(timeoutId);
@@ -213,7 +282,6 @@ async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
             const text = new TextDecoder('windows-1251').decode(buffer);
             const xml = new DOMParser().parseFromString(text, "text/xml");
             
-            // Проверяем на ошибки парсинга XML
             const parseError = xml.querySelector('parsererror');
             if (parseError) {
                 throw new APIError('Ошибка парсинга XML данных', 'PARSE_ERROR');
@@ -232,15 +300,23 @@ async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
                 throw error;
             }
             
-            // Экспоненциальная задержка между попытками
+            // Экспоненциальная задержка с jitter
             const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            const jitter = Math.random() * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay + jitter));
         }
     }
 }
 
-// Функция анимации чисел с оптимизацией
+// Оптимизированная анимация с пулом
 function animateValue(element, start, end, duration = 1000) {
+    // Отменяем предыдущую анимацию если есть
+    const existingAnimation = ObjectPool.getElement(element);
+    if (existingAnimation) {
+        cancelAnimationFrame(existingAnimation);
+        ObjectPool.removeFrame(existingAnimation);
+    }
+    
     const startTimestamp = performance.now();
     element.classList.add('rate-updating');
     
@@ -248,20 +324,25 @@ function animateValue(element, start, end, duration = 1000) {
         let progress = (timestamp - startTimestamp) / duration;
         if (progress > 1) progress = 1;
         
-        // Используем easing function для более плавной анимации
+        // Cubic ease-out для более плавной анимации
         const easedProgress = 1 - Math.pow(1 - progress, 3);
         
         const value = start + (end - start) * easedProgress;
         element.textContent = value.toFixed(4).replace('.', ',');
         
         if (progress < 1) {
-            requestAnimationFrame(step);
+            const frameId = requestAnimationFrame(step);
+            ObjectPool.setElement(element, frameId);
+            ObjectPool.addFrame(frameId);
         } else {
             element.classList.remove('rate-updating');
+            ObjectPool.setElement(element, null);
         }
     };
     
-    requestAnimationFrame(step);
+    const frameId = requestAnimationFrame(step);
+    ObjectPool.setElement(element, frameId);
+    ObjectPool.addFrame(frameId);
 }
 
 function showUpdateIndicator() {
@@ -300,6 +381,7 @@ function retryLoad() {
     loadAll();
 }
 
+// Оптимизированная загрузка из кэша с батчингом DOM операций
 function loadFromCache() {
     const cachedData = CacheManager.get();
     if (!cachedData) return false;
@@ -308,7 +390,8 @@ function loadFromCache() {
         const table = document.getElementById('ratesTable');
         const body = table.querySelector('tbody');
         
-        body.innerHTML = "";
+        // Используем DocumentFragment для батчинга DOM операций
+        const fragment = document.createDocumentFragment();
         
         cachedData.rates.forEach((rate, index) => {
             const tr = document.createElement("tr");
@@ -329,13 +412,21 @@ function loadFromCache() {
             tr.appendChild(tdName);
             tr.appendChild(tdRate);
             tr.appendChild(tdDiff);
-            body.appendChild(tr);
+            fragment.appendChild(tr);
         });
+
+        // Одна DOM операция вместо множественных
+        body.innerHTML = "";
+        body.appendChild(fragment);
 
         document.getElementById("currentDate").textContent = `Дата обновления: ${cachedData.date} (из кэша)`;
         
-        // Загружаем флаги после отрисовки
-        setTimeout(() => FlagLoader.loadVisibleFlags(), 100);
+        // Загружаем флаги асинхронно
+        if (window.requestIdleCallback) {
+            requestIdleCallback(() => FlagLoader.loadVisibleFlags());
+        } else {
+            setTimeout(() => FlagLoader.loadVisibleFlags(), 100);
+        }
         
         return true;
     } catch (e) {
@@ -368,22 +459,20 @@ async function loadAll() {
             }
         }
 
-        let today = getLastWorkingDay(new Date());
-        let yesterday = new Date(today);
+        const today = getLastWorkingDay(new Date().toISOString());
+        const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
-        yesterday = getLastWorkingDay(yesterday);
+        const yesterdayFormatted = getLastWorkingDay(yesterday.toISOString());
 
         const [xmlToday, xmlYest] = await Promise.all([
             fetchXMLWithRetry(`https://www.cbr.ru/scripts/XML_daily.asp?date_req=${formatDateCBR(today)}`),
-            fetchXMLWithRetry(`https://www.cbr.ru/scripts/XML_daily.asp?date_req=${formatDateCBR(yesterday)}`)
+            fetchXMLWithRetry(`https://www.cbr.ru/scripts/XML_daily.asp?date_req=${formatDateCBR(yesterdayFormatted)}`)
         ]);
 
-        if (isFirstLoad) {
-            body.innerHTML = "";
-        }
-
         const ratesData = [];
+        const fragment = document.createDocumentFragment();
 
+        // Обрабатываем данные в одном цикле
         orderedCodes.forEach((code, index) => {
             const vToday = Array.from(xmlToday.getElementsByTagName("Valute"))
                 .find(v => v.querySelector("CharCode").textContent === code);
@@ -403,11 +492,7 @@ async function loadAll() {
             const diffClass = diff >= 0 ? "diff-positive" : "diff-negative";
 
             ratesData.push({
-                code,
-                name,
-                rate: rateToday,
-                diff: diffFixed,
-                diffClass
+                code, name, rate: rateToday, diff: diffFixed, diffClass
             });
 
             if (isFirstLoad) {
@@ -429,11 +514,13 @@ async function loadAll() {
                 tr.appendChild(tdName);
                 tr.appendChild(tdRate);
                 tr.appendChild(tdDiff);
-                body.appendChild(tr);
+                fragment.appendChild(tr);
 
-                // Анимируем изменение значения курса
-                const prevRate = previousRates[code] ?? 0;
-                animateValue(tdRate, prevRate, rateToday, 1200);
+                // Планируем анимацию на следующий тик
+                setTimeout(() => {
+                    const prevRate = previousRates[code] ?? 0;
+                    animateValue(tdRate, prevRate, rateToday, 1200);
+                }, 0);
             } else {
                 // Обновляем существующие данные
                 const rows = body.querySelectorAll('tr');
@@ -442,11 +529,9 @@ async function loadAll() {
                     const rateCell = row.querySelector('.rate-cell');
                     const diffCell = row.children[2];
                     
-                    // Анимируем изменение курса
                     const prevRate = previousRates[code] ?? rateToday;
                     animateValue(rateCell, prevRate, rateToday, 800);
                     
-                    // Обновляем разность
                     diffCell.className = diffClass;
                     diffCell.textContent = `${diffFixed}%`;
                 }
@@ -455,21 +540,37 @@ async function loadAll() {
             previousRates[code] = rateToday;
         });
 
-        // Сохраняем данные в кэш
-        CacheManager.set({
-            rates: ratesData,
-            date: today.toLocaleDateString("ru-RU", {
-                year: "numeric", 
-                month: "long", 
-                day: "numeric"
-            }),
-            timestamp: Date.now()
-        });
+        // Батчинг DOM операций для первой загрузки
+        if (isFirstLoad && fragment.children.length > 0) {
+            body.innerHTML = "";
+            body.appendChild(fragment);
+        }
+
+        // Асинхронное сохранение в кэш
+        if (window.requestIdleCallback) {
+            requestIdleCallback(() => {
+                CacheManager.set({
+                    rates: ratesData,
+                    date: today.toLocaleDateString("ru-RU", {
+                        year: "numeric", month: "long", day: "numeric"
+                    }),
+                    timestamp: Date.now()
+                });
+            });
+        } else {
+            setTimeout(() => {
+                CacheManager.set({
+                    rates: ratesData,
+                    date: today.toLocaleDateString("ru-RU", {
+                        year: "numeric", month: "long", day: "numeric"
+                    }),
+                    timestamp: Date.now()
+                });
+            }, 0);
+        }
 
         document.getElementById("currentDate").textContent = `Дата обновления: ${today.toLocaleDateString("ru-RU", {
-            year: "numeric", 
-            month: "long", 
-            day: "numeric"
+            year: "numeric", month: "long", day: "numeric"
         })}`;
 
         if (!isFirstLoad) {
@@ -478,9 +579,13 @@ async function loadAll() {
             }, 1000);
         }
 
-        // Загружаем флаги после отрисовки
+        // Асинхронная загрузка флагов
         if (isFirstLoad) {
-            setTimeout(() => FlagLoader.loadVisibleFlags(), 500);
+            if (window.requestIdleCallback) {
+                requestIdleCallback(() => FlagLoader.loadVisibleFlags());
+            } else {
+                setTimeout(() => FlagLoader.loadVisibleFlags(), 500);
+            }
         }
 
         isFirstLoad = false;
@@ -489,7 +594,6 @@ async function loadAll() {
     } catch (error) {
         console.error("Ошибка загрузки курсов:", error);
         
-        // Пытаемся загрузить из кэша при ошибке
         if (error instanceof APIError && loadFromCache()) {
             ConnectionManager.updateStatus('Данные загружены из кэша из-за ошибки сети', true);
             return;
@@ -522,20 +626,29 @@ async function loadAll() {
     }
 }
 
-// Инициализация приложения
+// Очистка ресурсов при закрытии страницы
+window.addEventListener('beforeunload', () => {
+    ObjectPool.clearFrames();
+    if (FlagLoader.observer) {
+        FlagLoader.observer.disconnect();
+    }
+});
+
+// Инициализация приложения с оптимизацией
 document.addEventListener('DOMContentLoaded', () => {
     ConnectionManager.init();
+    FlagLoader.init();
     loadAll();
     
     // Обновление каждый час
     setInterval(loadAll, 3600000);
     
-    // Полноэкранный режим по клику
+    // Полноэкранный режим по клику (один раз)
     document.addEventListener('click', () => {
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {});
         }
-    }, { once: true });
+    }, { once: true, passive: true });
 });
 
 // Экспортируем функции для глобального доступа
