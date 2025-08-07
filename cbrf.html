@@ -24,6 +24,18 @@
         Обновлено: <span id="updateTime"></span>
     </div>
     
+    <div class="next-update-panel" id="nextUpdateIndicator">
+        <div class="next-update-info">
+            <div class="next-auto">Автообновление: ...</div>
+            <div class="next-cbr">ЦБ РФ: ...</div>
+        </div>
+        <button class="force-update-btn" onclick="forceUpdate()" title="Обновить сейчас">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/>
+            </svg>
+        </button>
+    </div>
+    
     <h1>Курсы валют ЦБ РФ</h1>
     
     <table id="ratesTable">

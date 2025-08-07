@@ -19,6 +19,151 @@ const CACHE_KEY = 'cbrf_currency_cache';
 const CACHE_EXPIRY_KEY = 'cbrf_cache_expiry';
 const CACHE_DURATION = 30 * 60 * 1000; // 30 минут
 
+// Система умных обновлений
+let updateTimer = null;
+let nextUpdateTime = null;
+
+// Российские праздники 2024-2025 (основные)
+const RUSSIAN_HOLIDAYS = new Set([
+    '2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05', 
+    '2024-01-08', '2024-02-23', '2024-03-08', '2024-05-01', '2024-05-09',
+    '2024-06-12', '2024-11-04', '2024-12-31',
+    '2025-01-01', '2025-01-02', '2025-01-03', '2025-01-08', '2025-02-23',
+    '2025-03-08', '2025-05-01', '2025-05-09', '2025-06-12', '2025-11-04',
+    '2025-12-31'
+]);
+
+const SmartUpdateManager = {
+    // Проверка рабочего дня
+    isWorkingDay(date = new Date()) {
+        const dayOfWeek = date.getDay();
+        const dateString = date.toISOString().split('T')[0];
+        
+        // Выходные дни (суббота = 6, воскресенье = 0)
+        if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+        
+        // Российские праздники
+        if (RUSSIAN_HOLIDAYS.has(dateString)) return false;
+        
+        return true;
+    },
+
+    // Получение оптимального интервала обновления
+    getUpdateInterval(date = new Date()) {
+        const hour = date.getHours();
+        const isWorking = this.isWorkingDay(date);
+        
+        if (!isWorking) {
+            // Выходные и праздники - обновления редко
+            return 6 * 60 * 60 * 1000; // 6 часов
+        }
+        
+        // Рабочие дни
+        if (hour >= 12 && hour <= 15) {
+            // Время обновления ЦБ РФ (13:00) - частые обновления
+            return 15 * 60 * 1000; // 15 минут
+        } else if (hour >= 8 && hour <= 18) {
+            // Рабочие часы - умеренные обновления
+            return 60 * 60 * 1000; // 1 час
+        } else if (hour >= 0 && hour <= 7) {
+            // Ночь - редкие обновления
+            return 4 * 60 * 60 * 1000; // 4 часа
+        } else {
+            // Вечер - умеренные обновления
+            return 2 * 60 * 60 * 1000; // 2 часа
+        }
+    },
+
+    // Получение времени следующего обновления ЦБ РФ
+    getNextCBRUpdateTime(date = new Date()) {
+        const moscowTime = new Date(date.toLocaleString("en-US", {timeZone: "Europe/Moscow"}));
+        const currentHour = moscowTime.getHours();
+        
+        // Если сегодня рабочий день и еще не 15:00
+        if (this.isWorkingDay(moscowTime) && currentHour < 15) {
+            const today = new Date(moscowTime);
+            today.setHours(13, 0, 0, 0); // 13:00 МСК
+            return today;
+        }
+        
+        // Иначе ищем следующий рабочий день
+        const nextDay = new Date(moscowTime);
+        nextDay.setDate(nextDay.getDate() + 1);
+        
+        while (!this.isWorkingDay(nextDay)) {
+            nextDay.setDate(nextDay.getDate() + 1);
+        }
+        
+        nextDay.setHours(13, 0, 0, 0); // 13:00 МСК следующего рабочего дня
+        return nextDay;
+    },
+
+    // Форматирование времени до следующего обновления
+    formatTimeUntilUpdate() {
+        if (!nextUpdateTime) return '';
+        
+        const now = new Date();
+        const diff = nextUpdateTime - now;
+        
+        if (diff <= 0) return 'Обновляется...';
+        
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        if (hours > 0) {
+            return `${hours}ч ${minutes}м`;
+        } else {
+            return `${minutes}м`;
+        }
+    },
+
+    // Установка таймера с учетом адаптивного интервала
+    scheduleNextUpdate() {
+        if (updateTimer) {
+            clearTimeout(updateTimer);
+        }
+        
+        const interval = this.getUpdateInterval();
+        nextUpdateTime = new Date(Date.now() + interval);
+        
+        console.log(`Следующее обновление через: ${this.formatTimeUntilUpdate()}`);
+        
+        updateTimer = setTimeout(() => {
+            loadAll();
+            this.scheduleNextUpdate(); // Планируем следующее обновление
+        }, interval);
+        
+        // Обновляем индикатор
+        this.updateNextUpdateIndicator();
+    },
+
+    // Обновление индикатора следующего обновления
+    updateNextUpdateIndicator() {
+        const indicator = document.getElementById('nextUpdateIndicator');
+        if (indicator) {
+            const timeText = this.formatTimeUntilUpdate();
+            const nextCBR = this.getNextCBRUpdateTime();
+            const isToday = nextCBR.toDateString() === new Date().toDateString();
+            
+            indicator.innerHTML = `
+                <div class="next-update-info">
+                    <div class="next-auto">Автообновление: ${timeText}</div>
+                    <div class="next-cbr">ЦБ РФ: ${isToday ? 'сегодня' : 'завтра'} в 13:00</div>
+                </div>
+            `;
+        }
+    },
+
+    // Принудительное обновление
+    forceUpdate() {
+        if (updateTimer) {
+            clearTimeout(updateTimer);
+        }
+        loadAll();
+        this.scheduleNextUpdate();
+    }
+};
+
 // Пул объектов для переиспользования
 const ObjectPool = {
     elements: new WeakMap(),
@@ -348,6 +493,7 @@ function animateValue(element, start, end, duration = 1000) {
 function showUpdateIndicator() {
     const indicator = document.getElementById('lastUpdated');
     const timeSpan = document.getElementById('updateTime');
+    const updatePanel = document.getElementById('nextUpdateIndicator');
     const now = new Date();
     
     timeSpan.textContent = now.toLocaleTimeString('ru-RU', {
@@ -358,8 +504,16 @@ function showUpdateIndicator() {
     
     indicator.style.display = 'block';
     
+    // Показываем состояние обновления
+    if (updatePanel) {
+        updatePanel.classList.add('updating');
+    }
+    
     setTimeout(() => {
         indicator.style.display = 'none';
+        if (updatePanel) {
+            updatePanel.classList.remove('updating');
+        }
     }, 3000);
 }
 
@@ -590,6 +744,9 @@ async function loadAll() {
 
         isFirstLoad = false;
         retryCount = 0;
+        
+        // Перепланируем следующее обновление
+        SmartUpdateManager.scheduleNextUpdate();
 
     } catch (error) {
         console.error("Ошибка загрузки курсов:", error);
@@ -634,14 +791,184 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
+// Pull-to-refresh функциональность
+const PullToRefresh = {
+    startY: 0,
+    currentY: 0,
+    pulling: false,
+    threshold: 80,
+    maxPull: 150,
+    
+    init() {
+        const table = document.getElementById('ratesTable');
+        if (!table) return;
+        
+        // Touch события для мобильных
+        table.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
+        table.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
+        table.addEventListener('touchend', this.handleTouchEnd.bind(this), { passive: false });
+        
+        // Mouse события для десктопа (для тестирования)
+        table.addEventListener('mousedown', this.handleMouseStart.bind(this));
+        table.addEventListener('mousemove', this.handleMouseMove.bind(this));
+        table.addEventListener('mouseup', this.handleMouseEnd.bind(this));
+        table.addEventListener('mouseleave', this.handleMouseEnd.bind(this));
+    },
+    
+    handleTouchStart(e) {
+        if (window.scrollY > 0) return;
+        this.startY = e.touches[0].clientY;
+        this.pulling = true;
+    },
+    
+    handleTouchMove(e) {
+        if (!this.pulling || window.scrollY > 0) return;
+        
+        this.currentY = e.touches[0].clientY;
+        const pullDistance = Math.max(0, this.currentY - this.startY);
+        
+        if (pullDistance > 0) {
+            e.preventDefault();
+            this.updatePullIndicator(pullDistance);
+        }
+    },
+    
+    handleTouchEnd(e) {
+        if (!this.pulling) return;
+        
+        const pullDistance = this.currentY - this.startY;
+        
+        if (pullDistance > this.threshold) {
+            this.triggerRefresh();
+        } else {
+            this.resetPull();
+        }
+        
+        this.pulling = false;
+    },
+    
+    handleMouseStart(e) {
+        if (window.scrollY > 0) return;
+        this.startY = e.clientY;
+        this.pulling = true;
+    },
+    
+    handleMouseMove(e) {
+        if (!this.pulling || window.scrollY > 0) return;
+        
+        this.currentY = e.clientY;
+        const pullDistance = Math.max(0, this.currentY - this.startY);
+        
+        if (pullDistance > 0) {
+            e.preventDefault();
+            this.updatePullIndicator(pullDistance);
+        }
+    },
+    
+    handleMouseEnd(e) {
+        if (!this.pulling) return;
+        
+        const pullDistance = this.currentY - this.startY;
+        
+        if (pullDistance > this.threshold) {
+            this.triggerRefresh();
+        } else {
+            this.resetPull();
+        }
+        
+        this.pulling = false;
+    },
+    
+    updatePullIndicator(distance) {
+        const limitedDistance = Math.min(distance, this.maxPull);
+        const progress = Math.min(distance / this.threshold, 1);
+        
+        let indicator = document.getElementById('pullRefreshIndicator');
+        if (!indicator) {
+            indicator = this.createPullIndicator();
+        }
+        
+        const rotation = progress * 180;
+        const opacity = Math.min(progress, 1);
+        const scale = 0.5 + (progress * 0.5);
+        
+        indicator.style.transform = `translateY(${limitedDistance - 60}px) scale(${scale})`;
+        indicator.style.opacity = opacity;
+        indicator.querySelector('.pull-arrow').style.transform = `rotate(${rotation}deg)`;
+        
+        // Изменяем текст в зависимости от прогресса
+        const text = indicator.querySelector('.pull-text');
+        if (progress >= 1) {
+            text.textContent = 'Отпустите для обновления';
+            indicator.classList.add('ready');
+        } else {
+            text.textContent = 'Потяните для обновления';
+            indicator.classList.remove('ready');
+        }
+    },
+    
+    createPullIndicator() {
+        const indicator = document.createElement('div');
+        indicator.id = 'pullRefreshIndicator';
+        indicator.className = 'pull-refresh-indicator';
+        indicator.innerHTML = `
+            <div class="pull-content">
+                <div class="pull-arrow">↓</div>
+                <div class="pull-text">Потяните для обновления</div>
+            </div>
+        `;
+        
+        document.body.appendChild(indicator);
+        return indicator;
+    },
+    
+    triggerRefresh() {
+        const indicator = document.getElementById('pullRefreshIndicator');
+        if (indicator) {
+            indicator.classList.add('refreshing');
+            indicator.querySelector('.pull-text').textContent = 'Обновление...';
+            indicator.querySelector('.pull-arrow').style.transform = 'rotate(360deg)';
+        }
+        
+        // Принудительное обновление
+        SmartUpdateManager.forceUpdate();
+        
+        // Сброс через 2 секунды
+        setTimeout(() => {
+            this.resetPull();
+        }, 2000);
+    },
+    
+    resetPull() {
+        const indicator = document.getElementById('pullRefreshIndicator');
+        if (indicator) {
+            indicator.style.transform = 'translateY(-60px) scale(0.5)';
+            indicator.style.opacity = '0';
+            indicator.classList.remove('ready', 'refreshing');
+            
+            setTimeout(() => {
+                if (indicator.parentNode) {
+                    indicator.parentNode.removeChild(indicator);
+                }
+            }, 300);
+        }
+    }
+};
+
 // Инициализация приложения с оптимизацией
 document.addEventListener('DOMContentLoaded', () => {
     ConnectionManager.init();
     FlagLoader.init();
+    PullToRefresh.init();
     loadAll();
     
-    // Обновление каждый час
-    setInterval(loadAll, 3600000);
+    // Запускаем умную систему обновлений
+    SmartUpdateManager.scheduleNextUpdate();
+    
+    // Обновляем индикатор каждую минуту
+    setInterval(() => {
+        SmartUpdateManager.updateNextUpdateIndicator();
+    }, 60000);
     
     // Полноэкранный режим по клику (один раз)
     document.addEventListener('click', () => {
@@ -653,3 +980,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Экспортируем функции для глобального доступа
 window.retryLoad = retryLoad;
+window.forceUpdate = () => SmartUpdateManager.forceUpdate();
