@@ -127,6 +127,7 @@ const SmartUpdateManager = {
         nextUpdateTime = new Date(Date.now() + interval);
         
         console.log(`Следующее обновление через: ${this.formatTimeUntilUpdate()}`);
+        console.log(`Текущее время: ${new Date().toLocaleString()}, Интервал: ${Math.round(interval/1000/60)} мин`);
         
         updateTimer = setTimeout(() => {
             loadAll();
@@ -425,11 +426,27 @@ async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
             
             const buffer = await response.arrayBuffer();
             const text = new TextDecoder('windows-1251').decode(buffer);
+            
+            // Проверяем что получили XML, а не HTML с ошибкой
+            if (!text.includes('<?xml') && !text.includes('<ValCurs')) {
+                console.warn('Получен не XML ответ:', text.substring(0, 200));
+                throw new APIError('Сервер ЦБ РФ вернул некорректный ответ', 'PARSE_ERROR');
+            }
+            
             const xml = new DOMParser().parseFromString(text, "text/xml");
             
+            // Проверяем ошибки парсинга
             const parseError = xml.querySelector('parsererror');
             if (parseError) {
-                throw new APIError('Ошибка парсинга XML данных', 'PARSE_ERROR');
+                console.warn('Ошибка парсинга XML:', parseError.textContent);
+                throw new APIError('Ошибка парсинга XML данных от ЦБ РФ', 'PARSE_ERROR');
+            }
+            
+            // Проверяем что есть данные о валютах
+            const valutes = xml.getElementsByTagName('Valute');
+            if (valutes.length === 0) {
+                console.warn('XML не содержит данных о валютах:', text.substring(0, 200));
+                throw new APIError('XML не содержит данных о курсах валют', 'PARSE_ERROR');
             }
             
             return xml;
@@ -531,7 +548,15 @@ function showError(message, canRetry = true) {
 }
 
 function retryLoad() {
+    console.log('Принудительная попытка обновления...');
     retryCount = 0;
+    
+    // Сбрасываем текущий таймер
+    if (updateTimer) {
+        clearTimeout(updateTimer);
+        updateTimer = null;
+    }
+    
     loadAll();
 }
 
@@ -751,8 +776,30 @@ async function loadAll() {
     } catch (error) {
         console.error("Ошибка загрузки курсов:", error);
         
-        if (error instanceof APIError && loadFromCache()) {
-            ConnectionManager.updateStatus('Данные загружены из кэша из-за ошибки сети', true);
+        // Пытаемся загрузить из кэша при любой ошибке
+        if (loadFromCache()) {
+            let statusMessage = 'Данные загружены из кэша';
+            if (error instanceof APIError) {
+                switch (error.code) {
+                    case 'PARSE_ERROR':
+                        statusMessage += ' (проблема с сервером ЦБ РФ)';
+                        break;
+                    case 'TIMEOUT':
+                        statusMessage += ' (таймаут)';
+                        break;
+                    default:
+                        statusMessage += ' (ошибка сети)';
+                }
+            }
+            ConnectionManager.updateStatus(statusMessage, true);
+            
+            // Планируем следующее обновление с увеличенным интервалом при ошибке
+            setTimeout(() => {
+                SmartUpdateManager.scheduleNextUpdate();
+            }, 100);
+            
+            // Увеличиваем retryCount но не блокируем систему
+            retryCount++;
             return;
         }
         
@@ -769,7 +816,9 @@ async function loadAll() {
                     canRetry = false;
                     break;
                 case 'PARSE_ERROR':
-                    errorMessage = 'Ошибка обработки данных от сервера ЦБ РФ';
+                    errorMessage = 'Ошибка обработки данных от сервера ЦБ РФ. Попробуйте позже.';
+                    // При ошибке парсинга можно повторить позже
+                    canRetry = true;
                     break;
                 default:
                     errorMessage = `Ошибка сети: ${error.message}`;
@@ -780,6 +829,21 @@ async function loadAll() {
         
         showError(errorMessage, canRetry && retryCount < MAX_RETRIES);
         retryCount++;
+        
+        // Планируем следующую попытку даже при критических ошибках
+        // Используем увеличенный интервал
+        if (retryCount < MAX_RETRIES) {
+            const retryDelay = Math.min(5 * 60 * 1000 * Math.pow(2, retryCount - 1), 30 * 60 * 1000); // От 5 минут до 30 минут
+            setTimeout(() => {
+                SmartUpdateManager.scheduleNextUpdate();
+            }, retryDelay);
+        } else {
+            // Если превышено количество попыток, планируем через час
+            setTimeout(() => {
+                retryCount = 0; // Сбрасываем счетчик
+                SmartUpdateManager.scheduleNextUpdate();
+            }, 60 * 60 * 1000); // 1 час
+        }
     }
 }
 
