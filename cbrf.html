@@ -3,6 +3,18 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Актуальные курсы валют ЦБ РФ с анимацией и офлайн поддержкой" />
+    <meta name="theme-color" content="#032c3c" />
+    
+    <!-- Resource hints для оптимизации -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preconnect" href="https://kurscbrf.free.nf" />
+    <link rel="dns-prefetch" href="//www.cbr.ru" />
+    
+    <!-- Preload критичных ресурсов -->
+    <link rel="preload" href="styles.css" as="style" />
+    <link rel="preload" href="script.js" as="script" />
+    
     <title>Курсы валют ЦБ РФ</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.3.2/css/flag-icons.min.css" />
     <link rel="stylesheet" href="styles.css" />
@@ -10,6 +22,18 @@
 <body>
     <div class="last-updated" id="lastUpdated">
         Обновлено: <span id="updateTime"></span>
+    </div>
+    
+    <div class="next-update-panel" id="nextUpdateIndicator">
+        <div class="next-update-info">
+            <div class="next-auto">Автообновление: ...</div>
+            <div class="next-cbr">ЦБ РФ: ...</div>
+        </div>
+        <button class="force-update-btn" onclick="forceUpdate()" title="Обновить сейчас">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/>
+            </svg>
+        </button>
     </div>
     
     <h1>Курсы валют ЦБ РФ</h1>

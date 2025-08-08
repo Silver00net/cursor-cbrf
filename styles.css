@@ -290,6 +290,137 @@ tfoot td {
     }
 }
 
+/* Панель следующего обновления */
+.next-update-panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    background: rgba(3,44,60,0.95);
+    color: #b3d7f7;
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 0.85em;
+    z-index: 1000;
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 200px;
+    animation: slideInLeft 0.6s ease-out;
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translate3d(-100px, 0, 0);
+    }
+    to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+.next-update-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.next-auto {
+    font-weight: 600;
+    color: #d9f0ff;
+    font-size: 0.9em;
+}
+
+.next-cbr {
+    color: #a6d0f4;
+    font-size: 0.8em;
+    opacity: 0.8;
+}
+
+.force-update-btn {
+    background: rgba(10,80,120,0.8);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #b3d7f7;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    will-change: transform, background-color;
+}
+
+.force-update-btn:hover {
+    background: rgba(10,80,120,1);
+    transform: scale3d(1.1, 1.1, 1);
+    border-color: rgba(255,255,255,0.4);
+}
+
+.force-update-btn:active {
+    transform: scale3d(0.95, 0.95, 1);
+}
+
+.force-update-btn svg {
+    transition: transform 0.3s ease;
+}
+
+.force-update-btn:hover svg {
+    transform: rotate(180deg);
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+    .next-update-panel {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        min-width: auto;
+        font-size: 0.8em;
+        padding: 10px 12px;
+    }
+    
+    .last-updated {
+        top: 10px;
+        right: 10px;
+        font-size: 0.8em;
+        padding: 6px 12px;
+    }
+    
+    .force-update-btn {
+        width: 28px;
+        height: 28px;
+    }
+    
+    .force-update-btn svg {
+        width: 14px;
+        height: 14px;
+    }
+}
+
+/* Состояние обновления */
+.next-update-panel.updating {
+    animation: updatePulse 1s ease-in-out infinite;
+}
+
+@keyframes updatePulse {
+    0%, 100% { 
+        background: rgba(3,44,60,0.95); 
+    }
+    50% { 
+        background: rgba(10,80,120,0.95); 
+    }
+}
+
+.force-update-btn.updating {
+    animation: spin 1s linear infinite;
+    pointer-events: none;
+}
+
 /* Сообщения об ошибках */
 .error-message {
     color: #f25c5c;
@@ -333,4 +464,94 @@ tfoot td {
 .connection-status.offline {
     background: rgba(242, 92, 92, 0.9);
     color: white;
+}
+
+/* Pull-to-refresh индикатор */
+.pull-refresh-indicator {
+    position: fixed;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-60px) scale(0.5);
+    z-index: 1001;
+    background: rgba(3,44,60,0.95);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 12px 20px;
+    color: #b3d7f7;
+    font-size: 0.9em;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.pull-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.pull-arrow {
+    font-size: 1.2em;
+    font-weight: bold;
+    transition: transform 0.3s ease;
+    color: #d9f0ff;
+}
+
+.pull-text {
+    font-weight: 500;
+    min-width: 140px;
+}
+
+.pull-refresh-indicator.ready {
+    background: rgba(10,80,120,0.95);
+    border-color: rgba(123, 216, 123, 0.5);
+}
+
+.pull-refresh-indicator.ready .pull-arrow {
+    color: #7bd87b;
+}
+
+.pull-refresh-indicator.refreshing {
+    background: rgba(10,80,120,0.95);
+}
+
+.pull-refresh-indicator.refreshing .pull-arrow {
+    animation: spin 1s linear infinite;
+    color: #7bd87b;
+}
+
+/* Мобильная адаптация pull-to-refresh */
+@media (max-width: 768px) {
+    .pull-refresh-indicator {
+        top: 40px;
+        font-size: 0.8em;
+        padding: 10px 16px;
+    }
+    
+    .pull-text {
+        min-width: 120px;
+    }
+    
+    .pull-arrow {
+        font-size: 1.1em;
+    }
+}
+
+/* Улучшение для touch устройств */
+@media (hover: none) and (pointer: coarse) {
+    .pull-refresh-indicator {
+        top: 35px;
+    }
+}
+
+/* Анимация для различных состояний */
+@keyframes pullBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+.pull-refresh-indicator.ready {
+    animation: pullBounce 0.6s ease-in-out infinite;
 }
