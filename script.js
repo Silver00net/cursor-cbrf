@@ -10,6 +10,16 @@ const currencySymbols = {
     CNY: "¥", TRY: "₺", HKD: "HK$", AED: "د.إ", INR: "₹"
 };
 
+// Конфигурация прокси. Можно переопределить через window.__CBRF_PROXY_BASE__ в HTML перед подключением script.js
+const PROXY_BASE_URL = (typeof window !== 'undefined' && window.__CBRF_PROXY_BASE__) || 'https://kurscbrf.free.nf/New1';
+
+function buildProxyRequestUrl(targetUpstreamUrl) {
+    const normalizedBaseUrl = PROXY_BASE_URL.replace(/\/+$/, '');
+    const isLegacyPhpProxy = /free\.nf/i.test(normalizedBaseUrl) || /\.php$/i.test(normalizedBaseUrl);
+    const endpoint = isLegacyPhpProxy ? '/proxy.php?url=' : '/proxy?url=';
+    return `${normalizedBaseUrl}${endpoint}${encodeURIComponent(targetUpstreamUrl)}`;
+}
+
 // Глобальные переменные
 let previousRates = {};
 let isFirstLoad = true;
@@ -404,7 +414,7 @@ async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
     
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const proxyUrl = 'https://kurscbrf.free.nf/New1/proxy.php?url=' + encodeURIComponent(url);
+            const proxyUrl = buildProxyRequestUrl(url);
             
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000);
