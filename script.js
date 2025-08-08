@@ -155,13 +155,14 @@ const SmartUpdateManager = {
             const timeText = this.formatTimeUntilUpdate();
             const nextCBR = this.getNextCBRUpdateTime();
             const isToday = nextCBR.toDateString() === new Date().toDateString();
-            
-            indicator.innerHTML = `
-                <div class="next-update-info">
-                    <div class="next-auto">Автообновление: ${timeText}</div>
-                    <div class="next-cbr">ЦБ РФ: ${isToday ? 'сегодня' : 'завтра'} в 13:00</div>
-                </div>
-            `;
+
+            const info = indicator.querySelector('.next-update-info');
+            if (info) {
+                const autoEl = info.querySelector('.next-auto');
+                const cbrEl = info.querySelector('.next-cbr');
+                if (autoEl) autoEl.textContent = `Автообновление: ${timeText}`;
+                if (cbrEl) cbrEl.textContent = `ЦБ РФ: ${isToday ? 'сегодня' : 'завтра'} в 13:00`;
+            }
         }
     },
 
@@ -1033,6 +1034,8 @@ document.addEventListener('DOMContentLoaded', () => {
     FlagLoader.init();
     PullToRefresh.init();
     loadAll();
+    // Обновим индикатор сразу после загрузки DOM
+    SmartUpdateManager.updateNextUpdateIndicator();
     
     // Запускаем умную систему обновлений
     SmartUpdateManager.scheduleNextUpdate();
