@@ -405,11 +405,9 @@ const getLastWorkingDay = memoize((dateString) => {
 // Оптимизированный fetch с пулом соединений
 async function fetchXMLWithRetry(url, retries = MAX_RETRIES) {
     const fetchOptions = {
-        headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        },
-        keepalive: true // Переиспользование соединения
+        // Убираем нестандартные заголовки, чтобы не провоцировать CORS preflight
+        // Браузер сам выставит необходимые заголовки
+        keepalive: true
     };
     
     for (let attempt = 1; attempt <= retries; attempt++) {

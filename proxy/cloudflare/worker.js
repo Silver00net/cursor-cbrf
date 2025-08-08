@@ -7,16 +7,16 @@ async function handleRequest(request) {
 
   // CORS preflight
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders() });
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
   if (requestUrl.pathname !== '/proxy') {
-    return new Response('Not Found', { status: 404, headers: corsHeaders() });
+    return new Response('Not Found', { status: 404, headers: corsHeaders(request) });
   }
 
   const targetParam = requestUrl.searchParams.get('url');
   if (!targetParam) {
-    return new Response('Missing "url" query parameter', { status: 400, headers: corsHeaders() });
+    return new Response('Missing "url" query parameter', { status: 400, headers: corsHeaders(request) });
   }
 
   let targetUrl;
@@ -29,7 +29,7 @@ async function handleRequest(request) {
   // Security: allow only CBR host
   const allowedHosts = new Set(['www.cbr.ru']);
   if (!allowedHosts.has(targetUrl.hostname)) {
-    return new Response('Forbidden host', { status: 403, headers: corsHeaders() });
+    return new Response('Forbidden host', { status: 403, headers: corsHeaders(request) });
   }
 
   try {
@@ -54,7 +54,7 @@ async function handleRequest(request) {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
       headers: {
-        ...corsHeaders(),
+        ...corsHeaders(request),
         'Content-Type': upstreamResponse.headers.get('Content-Type') || 'text/xml; charset=windows-1251',
         'Cache-Control': 'no-store'
       }
@@ -65,16 +65,26 @@ async function handleRequest(request) {
     const status = err && err.name === 'AbortError' ? 504 : 502;
     return new Response(`Proxy error: ${err && err.message ? err.message : 'unknown error'}`, {
       status,
-      headers: corsHeaders()
+      headers: corsHeaders(request)
     });
   }
 }
 
-function corsHeaders() {
+function corsHeaders(request) {
+  const requestHeaders = request ? request.headers.get('Access-Control-Request-Headers') : '';
+  const allowHeadersBase = ['Content-Type', 'Cache-Control', 'Pragma', 'Accept'];
+  const allowHeaders = requestHeaders
+    ? Array.from(new Set(
+        requestHeaders.split(',').map(h => h.trim()).filter(Boolean).concat(allowHeadersBase)
+      )).join(', ')
+    : allowHeadersBase.join(', ');
+
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': allowHeaders,
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin, Access-Control-Request-Headers'
   };
 }
 
